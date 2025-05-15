@@ -1,0 +1,134 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+
+#include "log.h"
+#include "tcp_utils.h"
+#include "block.h"     // read_block, write_block
+#include "common.h"
+#include "fs.h"
+#include "tcp_buffer.h"
+#include "session.h"
+#include "handle.h"
+
+#define NCMD (sizeof(cmd_table) / sizeof(cmd_table[0]))
+
+
+#define MAX_CONN 1024   // 最大并发连接数
+
+static session_t *sessions[MAX_CONN];
+
+FILE *log_file = NULL;
+
+static struct {
+    const char *name;
+    int (*handler)(session_t *, char *);
+} cmd_table[] = {
+    {"f",     handle_f},
+    {"mk",    handle_mk},
+    {"mkdir", handle_mkdir},
+    {"rm",    handle_rm},
+    {"rmdir", handle_rmdir},
+    {"cd",    handle_cd},
+    {"ls",    handle_ls},
+    {"cat",   handle_cat},
+    {"w",     handle_w},
+    {"i",     handle_i},
+    {"d",     handle_d},
+    {"login", handle_login},
+    {"e",     handle_e},
+};
+
+// // on_recv: 解析命令 & 调用 handler
+// int on_recv(int id, tcp_buffer *wb, char *msg, int len) {
+//     // msg 以 "\r\n" 结尾
+//     msg[len-2] = 0;
+//     char *cmd = strtok(msg, " ");
+//     char *args= strtok(NULL, "");
+//     for (int i = 0; i < NCMD; i++) {
+//         if (strcmp(cmd, cmd_table[i].name) == 0) {
+//             return cmd_table[i].handler(wb, args);
+//         }
+//     }
+//     RN(wb, "Unknown command");
+//     return 0;
+// }
+
+// void on_connection(int id) {
+//     // 可在这里记录日志
+//     Log("Client %d connected", id);
+// }
+
+// void cleanup(int id) {
+//     Log("Client %d disconnected", id);
+// }
+
+void on_connection(int id) {
+    tcp_buffer *wb = init_buffer();
+    sessions[id] = session_create(id, wb);
+    Log("Client %d connected", id);
+}
+
+void cleanup(int id) {
+    session_destroy(sessions[id]);
+    sessions[id] = NULL;
+    Log("Client %d disconnected", id);
+}
+
+int on_recv(int id, tcp_buffer *wb, char *msg, int len) {
+    session_t *s = sessions[id];
+    s->wb = wb;
+    msg[len-2]=0;
+    char *cmd  = strtok(msg, " ");
+    char *args = strtok(NULL, "");
+
+    // 找 handler
+    printf("here\n");
+    for (int i = 0; i < NCMD; i++) {
+        printf("cmd: %s, cmd_name %s\n", cmd, cmd_table[i].name);
+        if (strcmp(cmd, cmd_table[i].name)==0) {
+            printf("have found\n");
+            return cmd_table[i].handler(s, args);
+        }
+    }
+    RN(wb, "Unknown command");
+    return 0;
+}
+
+// main: 先连接磁盘服务器，再启动 FS TCP 服务
+int main(int argc, char *argv[]) {
+    if (argc != 4) {
+        fprintf(stderr,
+          "Usage: %s <bds_host> <bds_port> <fs_port> \n", argv[0]);
+        exit(1);
+    }
+    const char *bds_host = argv[1];
+    int bds_port        = atoi(argv[2]);
+    int fs_port         = atoi(argv[3]);
+
+    log_init("fs.log");
+
+    // 1. 连接到磁盘服务器
+    tcp_client bds_client = client_init(bds_host, bds_port);
+    bds_fd  = client_fd(bds_client);      
+    bds_rbuf = init_buffer();
+    bds_wbuf = init_buffer();
+    
+
+    // 2. 读取几何信息
+    get_disk_info(&ncyl, &nsec);
+
+    // 3. 初始化 FS 核心
+    sbinit();
+
+    // 4. 启动 FS 服务
+    tcp_server server = server_init(fs_port, 1,
+                                   on_connection, on_recv, cleanup);
+    server_run(server);
+
+    // 永不返回
+    log_close();
+    return 0;
+}
