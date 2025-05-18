@@ -38,6 +38,8 @@ static struct {
     {"i",     handle_i},
     {"d",     handle_d},
     {"login", handle_login},
+    {"useradd", handle_useradd},
+    {"userdel", handle_userdel},
     {"e",     handle_e},
 };
 
@@ -61,12 +63,39 @@ int on_recv(int id, tcp_buffer *wb, char *msg, int len) {
     char *cmd  = strtok(msg, " ");
     char *args = strtok(NULL, "");
 
+    bool fs_initialized = fs_is_initialized();
+     // 1) 在全局 fs 未初始化前，只允许 root 登录并执行 f
+     if (!fs_initialized) {
+        if (strcmp(cmd, "login") != 0 && strcmp(cmd, "f") != 0) {
+            RN(wb, "Error: filesystem not formatted. Please `login 1` then `f`.");
+            return 0;
+        }
+        if (strcmp(cmd, "login") == 0 && args && atoi(args) != 1) {
+            RN(wb, "Error: only root (UID=1) can login before format.");
+            return 0;
+        }
+    }
+
+    // 2) 登录后，只有 root 能跑 f
+    if (strcmp(cmd, "f") == 0 && s->uid != 1) {
+        RN(wb, "Error: only root can format.");
+        return 0;
+    }
+
+    // 3) 未登录用户（除了 login）一律拦截
+    if (s->uid < 0 && strcmp(cmd, "login") != 0) {
+        RN(wb, "Error: please `login <uid>` first.");
+        return 0;
+    }
+
+    if(s->uid != 1 && ((strcmp(cmd, "useradd") == 0) || (strcmp(cmd, "userdel") == 0))) {
+        RN(wb, "Error: only root can add/delete users.");
+        return 0;
+    }
+
     // 找 handler
-    printf("here\n");
     for (int i = 0; i < NCMD; i++) {
-        printf("cmd: %s, cmd_name %s\n", cmd, cmd_table[i].name);
         if (strcmp(cmd, cmd_table[i].name)==0) {
-            printf("have found\n");
             return cmd_table[i].handler(s, args);
         }
     }

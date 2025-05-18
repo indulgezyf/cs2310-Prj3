@@ -15,7 +15,12 @@ int handle_mk(session_t *s, char *args) {
     tcp_buffer *wb = s->wb;
     // 解析 args
     char *name = args;
-    short mode = 0666; //TODO 修改权限在extension里
+    short mode = 0660; //TODO 修改权限在extension里
+    // 权限检查：父目录写权限
+    if (!user_check_perm(s, s->cwd, PERM_WRITE)) {
+        RN(wb, "Permission denied");
+        return 0;
+    }
     if (cmd_mk(s, name, mode) == E_SUCCESS)   RY(wb);
     else                                   RN(wb, "Failed to create file");
     return 0;
@@ -24,7 +29,12 @@ int handle_mk(session_t *s, char *args) {
 int handle_mkdir(session_t *s, char *args) {
     tcp_buffer *wb = s->wb;
     char *name = args;
-    short mode = 0777; //TODO 修改权限在extension里
+    short mode = 0770; //TODO 修改权限在extension里
+    // 权限检查：父目录写权限
+    if (!user_check_perm(s, s->cwd, PERM_WRITE)) {
+        RN(wb, "Permission denied");
+        return 0;
+    }
     if (cmd_mkdir(s, name, mode) == E_SUCCESS) RY(wb);
     else                                    RN(wb, "Failed to create dir");
     return 0;
@@ -33,6 +43,20 @@ int handle_mkdir(session_t *s, char *args) {
 int handle_rm(session_t *s, char *args) {
     tcp_buffer *wb = s->wb;
     char *name = args;
+    // 查出文件 inode
+    inode *ip = dir_lookup(s->cwd, name, T_FILE);
+    if (!ip) {
+        RN(wb, "File not found");
+        return 0;
+    }
+    // 权限检查：父目录写权限 & 文件写权限
+    if (!user_check_perm(s, s->cwd, PERM_WRITE) ||
+        !user_check_perm(s, ip, PERM_WRITE)) {
+        iput(ip);
+        RN(wb, "Permission denied");
+        return 0;
+    }
+    iput(ip);
     if (cmd_rm(s, name) == E_SUCCESS)         RY(wb);
     else                                   RN(wb, "Failed to remove file");
     return 0;
@@ -41,6 +65,20 @@ int handle_rm(session_t *s, char *args) {
 int handle_rmdir(session_t *s, char *args) {
     tcp_buffer *wb = s->wb;
     char *name = args;
+    inode *ip = dir_lookup(s->cwd, name, T_DIR);
+    if (!ip) {
+        RN(wb, "Dir not found");
+        return 0;
+    }
+    // 权限检查：父目录写权限 & 目录写权限
+    if (!user_check_perm(s, s->cwd, PERM_WRITE) ||
+        !user_check_perm(s, ip, PERM_WRITE)) {
+        iput(ip);
+        RN(wb, "Permission denied");
+        return 0;
+    }
+    iput(ip);
+
     if (cmd_rmdir(s, name) == E_SUCCESS)      RY(wb);
     else                                   RN(wb, "Failed to remove dir");
     return 0;
@@ -49,6 +87,18 @@ int handle_rmdir(session_t *s, char *args) {
 int handle_cd(session_t *s, char *args) {
     tcp_buffer *wb = s->wb;
     char *name = args;
+    inode *ip = dir_lookup(s->cwd, name, T_DIR);
+    if (!ip) {
+        RN(wb, "Dir not found");
+        return 0;
+    }
+    // 权限检查：目录可读
+    if (!user_check_perm(s, ip, PERM_READ)) {
+        iput(ip);
+        RN(wb, "Permission denied");
+        return 0;
+    }
+    iput(ip);
     if (cmd_cd(s, name) == E_SUCCESS)         RY(wb);
     else                                   RN(wb, "Failed to change dir");
     return 0;
@@ -64,6 +114,12 @@ int handle_ls(session_t *s, char *args)
     ls_buf[0] = '\r'; 
     ls_buf[1] = '\n'; 
     off += 2;
+
+     // 权限检查：当前目录可读
+    if (!user_check_perm(s, s->cwd, PERM_READ)) {
+        RN(wb, "Permission denied");
+        return 0;
+    }
 
     /* 1. 读取目录项 */
     if (cmd_ls(s, &ents, &n) != E_SUCCESS) {
@@ -96,13 +152,47 @@ int handle_ls(session_t *s, char *args)
         /* 此时 timestr 就是格式化好的日期，如 "2025-05-15 11:20:30" */
 
         /* --- 组织一行输出 --- */
-        char line[160];
-        /* %-16.16s：左对齐，最长 16 字符，可根据 MAXNAME 调整 */
+        // 构造权限字符串（同前）
+        char perm_str[11];
+        perm_str[0] = (ip->type == T_DIR) ? 'd' : '-';
+        perm_str[1] = (ip->mode & S_IRUSR) ? 'r' : '-';
+        perm_str[2] = (ip->mode & S_IWUSR) ? 'w' : '-';
+        perm_str[3] = (ip->mode & S_IXUSR) ? 'x' : '-';
+        perm_str[4] = (ip->mode & S_IRGRP) ? 'r' : '-';
+        perm_str[5] = (ip->mode & S_IWGRP) ? 'w' : '-';
+        perm_str[6] = (ip->mode & S_IXGRP) ? 'x' : '-';
+        perm_str[7] = (ip->mode & S_IROTH) ? 'r' : '-';
+        perm_str[8] = (ip->mode & S_IWOTH) ? 'w' : '-';
+        perm_str[9] = (ip->mode & S_IXOTH) ? 'x' : '-';
+        perm_str[10] = '\0';
+
+        // 2) 链接数
+        uint nlink = ip->nlink;
+
+        // 3) 所有者和用户组。暂时直接用 UID/GID 数字输出，也可以做映射
+        //    如果想用名字，需要维护 uid->name, gid->name 的映射表
+        uint owner = ip->uid;
+        uint group = ip->gid;
+
+        // 4) 文件大小
+        uint size = ip->size;
+
+        // 5) 时间字符串 timestr，格式化成 "Mon DD HH:MM" （或年）
+        //    你原本的 strftime 格式 "%b %e %H:%M" 就可以了
+
+        // 6) 文件名 e->name
+
+        char line[256];
         int L = snprintf(line, sizeof(line),
-                         "%-16.16s %10u  %s\r\n",
-                         e->name,
-                         ip->size,
-                         timestr);
+            "%s %2u %5u %5u %8u %s %s\r\n",
+            perm_str,     // 权限，如 "drwxr-xr-x"
+            nlink,        // 链接数
+            owner,        // 所有者 UID
+            group,        // 用户组 GID
+            size,         // 文件大小
+            timestr,      // 时间，如 "Mar 31 13:46"
+            e->name       // 文件名
+        );
 
         // printf("line: %s, length: %d\n", line, L);
         if (L > 0 && L < (int)sizeof(line)) {
@@ -129,6 +219,19 @@ int handle_ls(session_t *s, char *args)
 int handle_cat(session_t *s, char *args) {
     tcp_buffer *wb = s->wb;
     char *name = args;
+    inode *ip = dir_lookup(s->cwd, name, T_FILE);
+    if (!ip) {
+        RN(wb, "File not found");
+        return 0;
+    }
+    // 权限检查：文件可读
+    if (!user_check_perm(s, ip, PERM_READ)) {
+        iput(ip);
+        RN(wb, "Permission denied");
+        return 0;
+    }
+    iput(ip);
+
     uchar *buf = NULL;
     uint len = 0;
     if (cmd_cat(s, name, &buf, &len) == E_SUCCESS) {
@@ -146,6 +249,15 @@ int handle_w(session_t *s, char *args) {
     char *name = strtok(args, " ");
     uint len = atoi(strtok(NULL, " "));
     char *data = strtok(NULL, "");
+    inode *ip = dir_lookup(s->cwd, name, T_FILE);
+    if (!ip) { RN(wb, "File not found"); return 0; }
+    // 权限检查：文件可写
+    if (!user_check_perm(s, ip, PERM_WRITE)) {
+        iput(ip);
+        RN(wb, "Permission denied");
+        return 0;
+    }
+    iput(ip);
     if (cmd_w(s, name, len, data) == E_SUCCESS) RY(wb);
     else                                     RN(wb, "Failed to write file");
     return 0;
@@ -157,6 +269,17 @@ int handle_i(session_t *s, char *args) {
     uint pos = atoi(strtok(NULL, " "));
     uint len = atoi(strtok(NULL, " "));
     char *data = strtok(NULL, "");
+
+    inode *ip = dir_lookup(s->cwd, name, T_FILE);
+    if (!ip) { RN(wb, "File not found"); return 0; }
+    // 权限检查：文件可写
+    if (!user_check_perm(s, ip, PERM_WRITE)) {
+        iput(ip);
+        RN(wb, "Permission denied");
+        return 0;
+    }
+    iput(ip);
+
     if (cmd_i(s, name, pos, len, data) == E_SUCCESS) RY(wb);
     else                                          RN(wb, "Failed to insert");
     return 0;
@@ -167,18 +290,29 @@ int handle_d(session_t *s, char *args) {
     char *name = strtok(args, " ");
     uint pos = atoi(strtok(NULL, " "));
     uint len = atoi(strtok(NULL, " "));
+
+    inode *ip = dir_lookup(s->cwd, name, T_FILE);
+    if (!ip) { RN(wb, "File not found"); return 0; }
+    // 权限检查：文件可写
+    if (!user_check_perm(s, ip, PERM_WRITE)) {
+        iput(ip);
+        RN(wb, "Permission denied");
+        return 0;
+    }
+    iput(ip);
+
     if (cmd_d(s, name, pos, len) == E_SUCCESS)       RY(wb);
     else                                          RN(wb, "Failed to delete");
     return 0;
 }
 
-int handle_login(session_t *s, char *args) {  
-    tcp_buffer *wb = s->wb;
-    int uid = atoi(args);
-    if (cmd_login(s, uid) == E_SUCCESS)  RY(wb);
-    else                              RN(wb, "Failed to login");
-    return 0;
-}
+// int handle_login(session_t *s, char *args) {  
+//     tcp_buffer *wb = s->wb;
+//     int uid = atoi(args);
+//     if (cmd_login(s, uid) == E_SUCCESS)  RY(wb);
+//     else                              RN(wb, "Failed to login");
+//     return 0;
+// }
 
 int handle_e(session_t *s, char *args) {
     tcp_buffer *wb = s->wb;
@@ -186,6 +320,53 @@ int handle_e(session_t *s, char *args) {
     return -1;
 }
 
+int handle_useradd(session_t *s, char *args) {
+    tcp_buffer *wb = s->wb;
+    if (!args) {
+        RN(wb, "Usage: useradd <uid>");
+        return 0;
+    }
+    int uid = atoi(args);
+    int r = user_add(s, uid);
+    if (r == E_SUCCESS)       RY(wb);
+    else if (r == E_PERMISSION_DENIED) RN(wb, "Permission denied");
+    else if (r == E_EXISTS)            RN(wb, "User already exists");
+    else if (r == E_INVALID_USER)      RN(wb, "Invalid user ID");
+    else                               RN(wb, "Failed to add user");
+    return 0;
+}
+
+int handle_userdel(session_t *s, char *args) {
+    tcp_buffer *wb = s->wb;
+    if (!args) {
+        RN(wb, "Usage: userdel <uid>");
+        return 0;
+    }
+    int uid = atoi(args);
+    int r = user_delete(s, uid);
+    if (r == E_SUCCESS)            RY(wb);
+    else if (r == E_PERMISSION_DENIED) RN(wb, "Permission denied");
+    else if (r == E_ERROR)            RN(wb, "Delete failed, may be not empty");
+    else if (r == E_INVALID_USER)     RN(wb, "Invalid user ID");
+    else                               RN(wb, "User not found");
+    return 0;
+}
+
+int handle_login(session_t *s, char *args) {
+    tcp_buffer *wb = s->wb;
+    if (!args) {
+        RN(wb, "Usage: login <uid>");
+        return 0;
+    }
+    int uid = atoi(args);
+    int r = user_login(s, uid);
+    // printf("uid: %d, r: %d\n", uid, r);
+    if (r == E_SUCCESS)       RY(wb);
+    else if (r == E_ERROR)    RN(wb, "Login failed");
+    else if (r == E_INVALID_USER) RN(wb, "Invalid user ID");
+    else                      RN(wb, "Unknown error");
+    return 0;
+}
 
 // // -- 以下 handler 调用 fs-layer cmd_* 函数 --
 // // 返回 <0 表示断开，0 表示继续

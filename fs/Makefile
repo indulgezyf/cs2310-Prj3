@@ -94,7 +94,8 @@ FS_OBJS = \
 	src/inode.o \
 	src/session.o \
 	src/handle.o \
-	 src/dirop.o
+	src/dirop.o \
+	src/user.o \
 
 FC_OBJS = \
 	src/client.o

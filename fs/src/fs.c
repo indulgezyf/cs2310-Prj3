@@ -1,15 +1,5 @@
 #include "fs.h"
 
-#include <assert.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#include "block.h"
-#include "log.h"
-
-#define USERS_FILE_INUM 0
-
 static bool fs_initialized = false; // 是否已经初始化
 
 // inode *cwd = NULL;
@@ -75,7 +65,7 @@ int cmd_f(session_t *s, int ncyl, int nsec) {
     }
     // 根目录元数据
     root->mode  = 0755;    
-    root->uid   = 0;
+    root->uid   = 1;
     root->gid   = 0;
     root->nlink = 1;      // 只为 "." 保留一个链接
     time_t now = time(NULL);
@@ -87,6 +77,32 @@ int cmd_f(session_t *s, int ncyl, int nsec) {
     // 8) 向根目录写入 "." 条目
     dir_add(root, ".", T_DIR, root->inum);
     iupdate(root);
+    
+    // mkdir home which store user's home dir
+    inode *home = NULL;
+    if (!home) {
+        // 在根目录下创建 /home
+        inode *root = iget(ROOT_INUM);
+        inode *tmp = ialloc(T_DIR);
+        if (!tmp) 
+        { 
+            iput(root);
+            Error("user_add: allocate inode fails"); 
+            return E_ERROR; 
+        }
+        tmp->mode = 0755; 
+        tmp->uid = 1; // root user 
+        tmp->gid = 0; 
+        tmp->nlink = 2;
+        uint now = (uint)time(NULL);
+        tmp->atime = tmp->mtime = tmp->ctime = now;
+        iupdate(tmp);
+        dir_add(root, "home", T_DIR, tmp->inum);
+        dir_add(tmp, ".", T_DIR, tmp->inum);
+        dir_add(tmp, "..", T_DIR, root->inum);
+        iput(tmp);
+        iput(root);
+    }
 
     // fs_mount
     s->cwd = root;
@@ -114,127 +130,13 @@ void fs_mount(session_t *s) {
     // 让每个 session 的 cwd 指向根目录
     inode *root = iget(ROOT_INUM);
     s->cwd = root;
+    fs_initialized = true;
     return;
 }
 
-
-// int dir_add(inode *ip, const char *name, short type, uint inum)
-// {
-//     if(ip->type != T_DIR)
-//     {
-//         Error("dir_add: ip->type must be T_DIR");
-//         return E_ERROR;
-//     }
-    
-//     entry tmp;
-//     uint off;
-//     for(off = 0; off < ip->size; off += sizeof(entry))
-//     {
-//         readi(ip, (uchar*)&tmp, off, sizeof(entry));
-//         if(tmp.inum == 0 && tmp.type != T_DIR && strncmp(tmp.name, "/", MAXNAME) == 0)
-//             break;
-//     }
-
-//     // 构造新的 dirent
-//     memset(&tmp, 0, sizeof(entry));
-//     tmp.inum = inum;
-//     tmp.type = type;
-//     strncpy(tmp.name, name, MAXNAME - 1);
-//     tmp.name[MAXNAME - 1] = '\0';
-//     // if(tmp.name[0] == '.' && tmp.name[1] == '\0')
-//     // {
-//     //     printf("dir_add: name is '.'\n");
-//     // }
-//     // if(tmp.name[0] == '.' && tmp.name[1] == '.' && tmp.name[2] == '\0')
-//     // {
-//     //     printf("dir_add: name is '..'\n");
-//     // }
-
-//     writei(ip, (uchar *)&tmp, off, sizeof(entry));
-//     return E_SUCCESS;
-// }
-
-// inode *dir_lookup(inode *ip, const char *name, short expected_type) {
-    
-//     if(!ip || !name) {
-//         Error("dir_lookup: invalid arguments");
-//         return NULL;
-//     }
-
-//     if (ip->type != T_DIR) {
-//         Error("dir_lookup: not a directory");
-//         return NULL;
-//     }
-
-//     // !debug
-//     // entry tmp1;
-//     // for (uint off = 0; off < ip->size; off += sizeof(entry)) {
-//     //     readi(ip, (uchar*)&tmp1, off, sizeof(entry));
-//     //     // if (tmp1.inum == 0) continue;
-//     //     printf("dir_name: %s, inum: %d, type: %d\n", tmp1.name, tmp1.inum, tmp1.type);
-//     // }
-//     // printf("finish dir_lookup\n");
-
-//     entry tmp;
-//     for (uint off = 0; off < ip->size; off += sizeof(entry)) {
-//         readi(ip, (uchar*)&tmp, off, sizeof(entry));
-//         if (tmp.inum == 0 && strncmp(tmp.name, "..", MAXNAME) != 0 && tmp.type != T_DIR) {
-//             // printf("dir_lookup: name is '/'");
-//             continue;
-//         }
-//         if (strncmp(tmp.name, name, MAXNAME) == 0 && tmp.type == expected_type) {
-//             return iget(tmp.inum);
-//         }
-//     }
-
-//     return NULL;
-// }
-
-// int dir_remove(inode *ip, const char *name, short expected_type) {
-//     if(!ip || !name) {
-//         Error("dir_remove: invalid arguments");
-//         return E_ERROR;
-//     }
-    
-//     if (ip->type != T_DIR) {
-//         Error("dir_remove: ip->type must be T_DIR");
-//         return E_ERROR;
-//     }
-
-//     entry tmp;
-//     for (uint off = 0; off < ip->size; off += sizeof(entry)) {
-//         readi(ip, (uchar*)&tmp, off, sizeof(entry));
-//         if (tmp.inum != 0 && strncmp(tmp.name, name, MAXNAME) == 0 && tmp.type == expected_type) {
-//             memset(&tmp, 0, sizeof(entry));
-//             writei(ip, (uchar *)&tmp, off, sizeof(entry));
-//             return E_SUCCESS;
-//         }
-//     }
-
-//     Error("dir_remove: entry not found");
-//     return E_ERROR;
-// }
-
-// bool dir_is_empty(inode *ip) {
-//     if (ip->type != T_DIR) {
-//         Error("dir_is_empty: ip->type must be T_DIR");
-//         return false;
-//     }
-
-//     entry tmp;
-//     for (uint off = 0; off < ip->size; off += sizeof(entry)) {
-//         readi(ip, (uchar*)&tmp, off, sizeof(entry));
-//         if (tmp.inum == 0) continue;
-
-//         // 跳过 "." 和 ".."
-//         if (strncmp(tmp.name, ".", MAXNAME) == 0) continue;
-//         if (strncmp(tmp.name, "..", MAXNAME) == 0) continue;
-
-//         return false;  // 发现实际内容
-//     }
-
-//     return true;
-// }
+bool fs_is_initialized(void) {
+    return fs_initialized;
+}
 
 int cmd_mk(session_t *s, char *name, short mode) {
     /* Create a new regular file in current directory */
@@ -613,12 +515,12 @@ int cmd_d(session_t *s, char *name, uint pos, uint len) {
     return E_SUCCESS;
 }
 
-int cmd_login(session_t *s, int auid) {
+// int cmd_login(session_t *s, int auid) {
     
-    if (auid < 0) {
-        Error("Invalid user ID");
-        return E_NOT_LOGGED_IN;
-    }
-    s->uid = auid;
-    return E_SUCCESS;
-}
+//     if (auid < 0) {
+//         Error("Invalid user ID");
+//         return E_NOT_LOGGED_IN;
+//     }
+//     s->uid = auid;
+//     return E_SUCCESS;
+// }

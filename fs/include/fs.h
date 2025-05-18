@@ -6,6 +6,15 @@
 #include "session.h"
 #include "dirop.h"
 #include <stdbool.h>
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "block.h"
+#include "log.h"
+
+#define USERS_FILE_INUM 0
 
 typedef struct session session_t;
 
@@ -25,6 +34,7 @@ extern int current_gid;
 
 void sbinit(int nblocks);
 void fs_mount(session_t *s);
+bool fs_is_initialized(void);
 
 int cmd_f(session_t *s, int ncyl, int nsec);
 
