@@ -93,7 +93,8 @@ FS_OBJS = \
 	src/fs.o \
 	src/inode.o \
 	src/session.o \
-	src/handle.o
+	src/handle.o \
+	 src/dirop.o
 
 FC_OBJS = \
 	src/client.o

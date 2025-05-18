@@ -41,34 +41,11 @@ static struct {
     {"e",     handle_e},
 };
 
-// // on_recv: 解析命令 & 调用 handler
-// int on_recv(int id, tcp_buffer *wb, char *msg, int len) {
-//     // msg 以 "\r\n" 结尾
-//     msg[len-2] = 0;
-//     char *cmd = strtok(msg, " ");
-//     char *args= strtok(NULL, "");
-//     for (int i = 0; i < NCMD; i++) {
-//         if (strcmp(cmd, cmd_table[i].name) == 0) {
-//             return cmd_table[i].handler(wb, args);
-//         }
-//     }
-//     RN(wb, "Unknown command");
-//     return 0;
-// }
-
-// void on_connection(int id) {
-//     // 可在这里记录日志
-//     Log("Client %d connected", id);
-// }
-
-// void cleanup(int id) {
-//     Log("Client %d disconnected", id);
-// }
 
 void on_connection(int id) {
-    tcp_buffer *wb = init_buffer();
-    sessions[id] = session_create(id, wb);
+    sessions[id] = session_create(id);
     Log("Client %d connected", id);
+    handle_mount(sessions[id]);
 }
 
 void cleanup(int id) {
@@ -93,7 +70,7 @@ int on_recv(int id, tcp_buffer *wb, char *msg, int len) {
             return cmd_table[i].handler(s, args);
         }
     }
-    RN(wb, "Unknown command");
+    RN(s->wb, "Unknown command");
     return 0;
 }
 
@@ -120,8 +97,6 @@ int main(int argc, char *argv[]) {
     // 2. 读取几何信息
     get_disk_info(&ncyl, &nsec);
 
-    // 3. 初始化 FS 核心
-    sbinit();
 
     // 4. 启动 FS 服务
     tcp_server server = server_init(fs_port, 1,

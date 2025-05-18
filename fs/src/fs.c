@@ -10,12 +10,14 @@
 
 #define USERS_FILE_INUM 0
 
+static bool fs_initialized = false; // 是否已经初始化
+
 // inode *cwd = NULL;
 // int current_uid = -1; // -1 means no user logged in
 int current_gid = 0; //TODO set gid in function login
 
 void sbinit(int nblocks) {
-    sb.magic            = 0x20240427;  
+    sb.magic            = MAGIC_NUM;  
     sb.size             = nblocks;
     sb.ndataBlocksBitmapBlocks = 1; // 1 块数据块 bitmap
     sb.ninodeBlocksBitmapBlocks = 1; // 1 块 inode bitmap
@@ -29,60 +31,6 @@ void sbinit(int nblocks) {
     sb.ndataBlocks      = nblocks - sb.blockStart;
 }
 
-// void free_sram() {
-//     if (sram) {
-//         free(sram);
-//         sram = NULL;
-//     }
-// }
-
-
-// int cmd_f(int ncyl, int nsec) {
-//     uint nblocks     = ncyl * nsec;
-//     uint total_bytes = nblocks * BSIZE;
-
-//     // 1) 分配并清空模拟磁盘空间
-//     sram = malloc(total_bytes);
-//     if (!sram) {
-//         Error("Failed to allocate simulated disk");
-//         return E_ERROR;
-//     }
-//     memset(sram, 0, total_bytes);
-
-//     // 2) 初始化超级块并写入 block0
-//     sbinit(nblocks);
-//     memcpy(sram, &sb, sizeof(superblock));
-
-//     // 3) 清空 inode bitmap、block bitmap 和 inode 区
-//     memset(sram + sb.inodeBitmapStart * BSIZE, 0, BSIZE);
-//     memset(sram + sb.bmapstart        * BSIZE, 0, BSIZE);
-//     memset(sram + sb.inodeStart       * BSIZE, 0, sb.ninodeBlocks * BSIZE);
-
-//     // 4) 初始化 inode 缓存
-//     init_inode_cache();
-
-//     // 5) 为根目录分配 inode 并初始化 “.”、“..”
-//     inode *root = ialloc(T_DIR);
-//     if (!root) {
-//         Error("cmd_f: failed to allocate root inode");
-//         return E_ERROR;
-//     }
-//     // 设置根目录元数据
-//     root->mode  = 0755;                // drwxr-xr-x
-//     root->uid   = 0;                   // root 用户
-//     root->gid   = 0;                   // root 组
-//     root->nlink = 2;                   // “.” 和 “..”
-//     root->atime = root->mtime = root->ctime = time(NULL);
-
-//     // 在根目录文件里添加 “.” 和 “..”
-//     dir_add(root, ".",  T_DIR, root->inum);
-//     iupdate(root);
-
-//     // 6) 将 cwd 设为根目录
-//     cwd = root;
-
-//     return E_SUCCESS;
-// }
 
 int cmd_f(session_t *s, int ncyl, int nsec) {
     uint nblocks = ncyl * nsec;
@@ -140,142 +88,153 @@ int cmd_f(session_t *s, int ncyl, int nsec) {
     dir_add(root, ".", T_DIR, root->inum);
     iupdate(root);
 
-    // 9) 设置当前工作目录为根目录
+    // fs_mount
     s->cwd = root;
 
+    //changg static variable fs_initialized
+    fs_initialized = true;
+
     return E_SUCCESS;
 }
 
+// 每次挂载／初始化都需要做的
+void fs_mount(session_t *s) {
+    // 1) 先读整个扇区到临时缓冲
+    uchar buf[BSIZE];
+    read_block(0, buf);
 
+    // 2) 只复制 superblock 结构体本身的大小
+    memcpy(&sb, buf, sizeof(sb));
 
-int dir_add(inode *ip, const char *name, short type, uint inum)
-{
-    if(ip->type != T_DIR)
-    {
-        Error("dir_add: ip->type must be T_DIR");
-        return E_ERROR;
+    if (sb.magic != MAGIC_NUM) {
+        // fprintf(stderr, "This file system has not been formatted.\n", sb.magic);
+        return;
     }
+    init_inode_cache();
+    // 让每个 session 的 cwd 指向根目录
+    inode *root = iget(ROOT_INUM);
+    s->cwd = root;
+    return;
+}
+
+
+// int dir_add(inode *ip, const char *name, short type, uint inum)
+// {
+//     if(ip->type != T_DIR)
+//     {
+//         Error("dir_add: ip->type must be T_DIR");
+//         return E_ERROR;
+//     }
     
-    entry tmp;
-    uint off;
-    for(off = 0; off < ip->size; off += sizeof(entry))
-    {
-        readi(ip, (uchar*)&tmp, off, sizeof(entry));
-        if(tmp.inum == 0 && tmp.type != T_DIR && strncmp(tmp.name, "/", MAXNAME) == 0)
-            break;
-    }
+//     entry tmp;
+//     uint off;
+//     for(off = 0; off < ip->size; off += sizeof(entry))
+//     {
+//         readi(ip, (uchar*)&tmp, off, sizeof(entry));
+//         if(tmp.inum == 0 && tmp.type != T_DIR && strncmp(tmp.name, "/", MAXNAME) == 0)
+//             break;
+//     }
 
-    // 构造新的 dirent
-    memset(&tmp, 0, sizeof(entry));
-    tmp.inum = inum;
-    tmp.type = type;
-    strncpy(tmp.name, name, MAXNAME - 1);
-    tmp.name[MAXNAME - 1] = '\0';
-    // if(tmp.name[0] == '.' && tmp.name[1] == '\0')
-    // {
-    //     printf("dir_add: name is '.'\n");
-    // }
-    // if(tmp.name[0] == '.' && tmp.name[1] == '.' && tmp.name[2] == '\0')
-    // {
-    //     printf("dir_add: name is '..'\n");
-    // }
+//     // 构造新的 dirent
+//     memset(&tmp, 0, sizeof(entry));
+//     tmp.inum = inum;
+//     tmp.type = type;
+//     strncpy(tmp.name, name, MAXNAME - 1);
+//     tmp.name[MAXNAME - 1] = '\0';
+//     // if(tmp.name[0] == '.' && tmp.name[1] == '\0')
+//     // {
+//     //     printf("dir_add: name is '.'\n");
+//     // }
+//     // if(tmp.name[0] == '.' && tmp.name[1] == '.' && tmp.name[2] == '\0')
+//     // {
+//     //     printf("dir_add: name is '..'\n");
+//     // }
 
-    writei(ip, (uchar *)&tmp, off, sizeof(entry));
-    return E_SUCCESS;
-}
+//     writei(ip, (uchar *)&tmp, off, sizeof(entry));
+//     return E_SUCCESS;
+// }
 
-inode *dir_lookup(inode *ip, const char *name, short expected_type) {
+// inode *dir_lookup(inode *ip, const char *name, short expected_type) {
     
-    if(!ip || !name) {
-        Error("dir_lookup: invalid arguments");
-        return NULL;
-    }
+//     if(!ip || !name) {
+//         Error("dir_lookup: invalid arguments");
+//         return NULL;
+//     }
 
-    if (ip->type != T_DIR) {
-        Error("dir_lookup: not a directory");
-        return NULL;
-    }
+//     if (ip->type != T_DIR) {
+//         Error("dir_lookup: not a directory");
+//         return NULL;
+//     }
 
-    // !debug
-    // entry tmp1;
-    // for (uint off = 0; off < ip->size; off += sizeof(entry)) {
-    //     readi(ip, (uchar*)&tmp1, off, sizeof(entry));
-    //     // if (tmp1.inum == 0) continue;
-    //     printf("dir_name: %s, inum: %d, type: %d\n", tmp1.name, tmp1.inum, tmp1.type);
-    // }
-    // printf("finish dir_lookup\n");
+//     // !debug
+//     // entry tmp1;
+//     // for (uint off = 0; off < ip->size; off += sizeof(entry)) {
+//     //     readi(ip, (uchar*)&tmp1, off, sizeof(entry));
+//     //     // if (tmp1.inum == 0) continue;
+//     //     printf("dir_name: %s, inum: %d, type: %d\n", tmp1.name, tmp1.inum, tmp1.type);
+//     // }
+//     // printf("finish dir_lookup\n");
 
-    entry tmp;
-    for (uint off = 0; off < ip->size; off += sizeof(entry)) {
-        readi(ip, (uchar*)&tmp, off, sizeof(entry));
-        if (tmp.inum == 0 && strncmp(tmp.name, "..", MAXNAME) != 0 && tmp.type != T_DIR) {
-            // printf("dir_lookup: name is '/'");
-            continue;
-        }
-        // {
-        //     // // Check this entry if is root 
-        //     // if ((strncmp(tmp.name, "/", MAXNAME) == 0 || strncmp(tmp.name, "..", MAXNAME) == 0) && tmp.type == T_DIR) {
-        //     //     // printf("123\n");
-        //     //     return iget(tmp.inum);
-        //     // }
-        //     // else
-        //     // {
-        //         continue;
-        //     // }
-        // }
-        if (strncmp(tmp.name, name, MAXNAME) == 0 && tmp.type == expected_type) {
-            return iget(tmp.inum);
-        }
-    }
+//     entry tmp;
+//     for (uint off = 0; off < ip->size; off += sizeof(entry)) {
+//         readi(ip, (uchar*)&tmp, off, sizeof(entry));
+//         if (tmp.inum == 0 && strncmp(tmp.name, "..", MAXNAME) != 0 && tmp.type != T_DIR) {
+//             // printf("dir_lookup: name is '/'");
+//             continue;
+//         }
+//         if (strncmp(tmp.name, name, MAXNAME) == 0 && tmp.type == expected_type) {
+//             return iget(tmp.inum);
+//         }
+//     }
 
-    return NULL;
-}
+//     return NULL;
+// }
 
-int dir_remove(inode *ip, const char *name, short expected_type) {
-    if(!ip || !name) {
-        Error("dir_remove: invalid arguments");
-        return E_ERROR;
-    }
+// int dir_remove(inode *ip, const char *name, short expected_type) {
+//     if(!ip || !name) {
+//         Error("dir_remove: invalid arguments");
+//         return E_ERROR;
+//     }
     
-    if (ip->type != T_DIR) {
-        Error("dir_remove: ip->type must be T_DIR");
-        return E_ERROR;
-    }
+//     if (ip->type != T_DIR) {
+//         Error("dir_remove: ip->type must be T_DIR");
+//         return E_ERROR;
+//     }
 
-    entry tmp;
-    for (uint off = 0; off < ip->size; off += sizeof(entry)) {
-        readi(ip, (uchar*)&tmp, off, sizeof(entry));
-        if (tmp.inum != 0 && strncmp(tmp.name, name, MAXNAME) == 0 && tmp.type == expected_type) {
-            memset(&tmp, 0, sizeof(entry));
-            writei(ip, (uchar *)&tmp, off, sizeof(entry));
-            return E_SUCCESS;
-        }
-    }
+//     entry tmp;
+//     for (uint off = 0; off < ip->size; off += sizeof(entry)) {
+//         readi(ip, (uchar*)&tmp, off, sizeof(entry));
+//         if (tmp.inum != 0 && strncmp(tmp.name, name, MAXNAME) == 0 && tmp.type == expected_type) {
+//             memset(&tmp, 0, sizeof(entry));
+//             writei(ip, (uchar *)&tmp, off, sizeof(entry));
+//             return E_SUCCESS;
+//         }
+//     }
 
-    Error("dir_remove: entry not found");
-    return E_ERROR;
-}
+//     Error("dir_remove: entry not found");
+//     return E_ERROR;
+// }
 
-bool dir_is_empty(inode *ip) {
-    if (ip->type != T_DIR) {
-        Error("dir_is_empty: ip->type must be T_DIR");
-        return false;
-    }
+// bool dir_is_empty(inode *ip) {
+//     if (ip->type != T_DIR) {
+//         Error("dir_is_empty: ip->type must be T_DIR");
+//         return false;
+//     }
 
-    entry tmp;
-    for (uint off = 0; off < ip->size; off += sizeof(entry)) {
-        readi(ip, (uchar*)&tmp, off, sizeof(entry));
-        if (tmp.inum == 0) continue;
+//     entry tmp;
+//     for (uint off = 0; off < ip->size; off += sizeof(entry)) {
+//         readi(ip, (uchar*)&tmp, off, sizeof(entry));
+//         if (tmp.inum == 0) continue;
 
-        // 跳过 "." 和 ".."
-        if (strncmp(tmp.name, ".", MAXNAME) == 0) continue;
-        if (strncmp(tmp.name, "..", MAXNAME) == 0) continue;
+//         // 跳过 "." 和 ".."
+//         if (strncmp(tmp.name, ".", MAXNAME) == 0) continue;
+//         if (strncmp(tmp.name, "..", MAXNAME) == 0) continue;
 
-        return false;  // 发现实际内容
-    }
+//         return false;  // 发现实际内容
+//     }
 
-    return true;
-}
+//     return true;
+// }
 
 int cmd_mk(session_t *s, char *name, short mode) {
     /* Create a new regular file in current directory */

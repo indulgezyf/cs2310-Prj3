@@ -158,7 +158,7 @@ void get_disk_info(int *ncyl, int *nsec) {
  */
 void read_block(int blockno, uchar *out_buf) {
     // 验证 blockno 合法性
-    if (blockno < 0 || blockno >= (int)sb.size) {
+    if (blockno < 0 || (blockno != 0 &&  blockno >= (int)sb.size)) {
         Error("read_block: blockno %d out of range", blockno);
         return;
     }

@@ -25,6 +25,7 @@ enum {
     E_NOT_LOGGED_IN = 2,
     E_NOT_FORMATTED = 3,
     E_PERMISSION_DENIED = 4,
+    E_EXISTS = 5, //users exists
 };
 
 #endif

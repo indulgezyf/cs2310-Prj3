@@ -7,6 +7,10 @@ int handle_f(session_t *s, char *args) {
     return 0;
 }
 
+void handle_mount(session_t *s) {
+    fs_mount(s);
+}
+
 int handle_mk(session_t *s, char *args) {
     tcp_buffer *wb = s->wb;
     // 解析 args

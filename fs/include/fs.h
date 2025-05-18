@@ -4,32 +4,34 @@
 #include "common.h"
 #include "inode.h"
 #include "session.h"
+#include "dirop.h"
 #include <stdbool.h>
 
 typedef struct session session_t;
 
 // used for cmd_ls
-typedef struct {
-    short type;
-    uint inum;
-    char name[MAXNAME];
-    // ...
-    // ...
-    // Other fields can be added as needed
-} entry;
+// typedef struct {
+//     short type;
+//     uint inum;
+//     char name[MAXNAME];
+//     // ...
+//     // ...
+//     // Other fields can be added as needed
+// } entry;
 
 extern inode* cwd; // current work dir
 extern int current_uid; // Current user ID
 extern int current_gid;
 
-void sbinit();
+void sbinit(int nblocks);
+void fs_mount(session_t *s);
 
 int cmd_f(session_t *s, int ncyl, int nsec);
 
-int dir_add(inode *ip, const char *name, short type, uint inum);
-inode *dir_lookup(inode *ip, const char *name, short expected_type);
-int dir_remove(inode *ip, const char *name, short expected_type);
-bool dir_is_empty(inode *ip);
+// int dir_add(inode *ip, const char *name, short type, uint inum);
+// inode *dir_lookup(inode *ip, const char *name, short expected_type);
+// int dir_remove(inode *ip, const char *name, short expected_type);
+// bool dir_is_empty(inode *ip);
 
 
 int cmd_mk(session_t *s, char *name, short mode);

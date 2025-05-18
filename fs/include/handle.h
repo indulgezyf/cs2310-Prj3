@@ -24,6 +24,10 @@
   do {                                       \
     reply_with_no((wb), (msg), strlen(msg)); \
   } while (0)
+#define Re(wb, msg) \
+  do {                                       \
+    reply((wb), (msg), strlen(msg));                 \
+  } while (0)
 
 int handle_login(session_t *s, char *args);
 int handle_f(session_t *s, char *args);
@@ -38,5 +42,6 @@ int handle_w(session_t *s, char *args);
 int handle_i(session_t *s, char *args);
 int handle_d(session_t *s, char *args);
 int handle_e(session_t *s, char *args);
+void handle_mount(session_t *s);
 
 #endif

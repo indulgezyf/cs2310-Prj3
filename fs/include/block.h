@@ -4,6 +4,8 @@
 #include "common.h"
 #include "tcp_buffer.h"
 
+#define MAGIC_NUM 0x20041216  // Magic number for the file system
+
 typedef struct {
     uint magic;      // Magic number, used to identify the file system
     uint size;       // Size in blocks

@@ -18,7 +18,7 @@ typedef struct session {
   pthread_mutex_t lock;  // 若需要并发读写保护
 } session_t;
 
-session_t *session_create(int conn_id, tcp_buffer *wb);
+session_t *session_create(int conn_id);
 void session_destroy(session_t *s);
 
 #endif
