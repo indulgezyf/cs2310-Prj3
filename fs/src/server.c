@@ -12,6 +12,7 @@
 #include "tcp_buffer.h"
 #include "session.h"
 #include "handle.h"
+#include "cache.h"
 
 #define NCMD (sizeof(cmd_table) / sizeof(cmd_table[0]))
 
@@ -125,12 +126,15 @@ int main(int argc, char *argv[]) {
 
     // 2. 读取几何信息
     get_disk_info(&ncyl, &nsec);
-
+     
+    //3. init cache
+    cache_init();
 
     // 4. 启动 FS 服务
     tcp_server server = server_init(fs_port, 1,
                                    on_connection, on_recv, cleanup);
     server_run(server);
+    cache_destroy();
 
     // 永不返回
     log_close();

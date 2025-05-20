@@ -3,27 +3,11 @@
 
 #include "common.h"
 #include "tcp_buffer.h"
+#include "superblock.h"
+#include "cache.h"
 
 #define MAGIC_NUM 0x20041216  // Magic number for the file system
 
-typedef struct {
-    uint magic;      // Magic number, used to identify the file system
-    uint size;       // Size in blocks
-    uint ndataBlocks;   // Number of data blocks
-    uint ninodeBlocks;     // Number of inode blocks
-    uint ndataBlocksBitmapBlocks; // Number of data block bitmap blocks
-    uint ninodeBlocksBitmapBlocks; // Number of inode block bitmap blocks
-    // !assume the number of data block bitmap and inode block bitmap is 1
-
-    uint bmapstart;  // Block number of first free map block
-    uint inodeStart;  // Block number of first inode block
-    uint inodeBitmapStart;  // Block number of first inode bitmap block
-    uint blockStart;  // Block number of first data block
-
-} superblock;
-
-// sb is defined in block.c
-extern superblock sb;
 extern uchar* sram;  // Simulated disk memory
 extern int ncyl; // Number of cylinders
 extern int nsec; // Number of sectors

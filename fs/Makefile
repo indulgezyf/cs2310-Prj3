@@ -96,6 +96,7 @@ FS_OBJS = \
 	src/handle.o \
 	src/dirop.o \
 	src/user.o \
+	src/cache.o \
 
 FC_OBJS = \
 	src/client.o
